@@ -128,19 +128,27 @@ def NormalizeMultUseData(data,normalize):
                 data[j,i]  =  (data[j,i] - listlow)/delta
     return  data
 
-def data_split(sequence, n_timestamp):
-    X = []
-    y = []
-    for i in range(len(sequence)):
-        end_ix = i + n_timestamp
+# def data_split(sequence, n_timestamp):
+#     X = []
+#     y = []
+#     for i in range(len(sequence)):
+#         end_ix = i + n_timestamp
 
-        if end_ix > len(sequence) - 1:
-            break
+#         if end_ix > len(sequence) - 1:
+#             break
 
-        seq_x, seq_y = sequence[i:end_ix], sequence[end_ix]
-        X.append(seq_x)
-        y.append(seq_y)
+#         seq_x, seq_y = sequence[i:end_ix], sequence[end_ix]
+#         X.append(seq_x)
+#         y.append(seq_y)
+#     return np.array(X), np.array(y)
+
+def data_split(data, n_timestamp):
+    X, y = [], []
+    for i in range(len(data) - n_timestamp):
+        X.append(data[i:i + n_timestamp])
+        y.append(data[i + n_timestamp])
     return np.array(X), np.array(y)
+
 
 def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
     n_vars = 1 if type(data) is list else data.shape[1]
