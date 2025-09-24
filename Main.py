@@ -23,11 +23,20 @@ data = base.join(residuals, how='inner').select_dtypes(include=[np.number])
 # Splits
 train_idx = Config.TRAIN_SPLIT_INDEX
 time_steps = Config.TIME_STEPS
-horizon = Config.PREDICTION_HORIZON
+
+# 🔥 Ask user for prediction horizon
+while True:
+    try:
+        horizon = int(input("Enter number of days to predict (e.g., 1, 2, 7): "))
+        if horizon > 0:
+            break
+        else:
+            print("Please enter a positive number.")
+    except ValueError:
+        print("Invalid input. Please enter a number.")
 
 # get training area (we will reserve last 'horizon' rows for short-term forecasting)
 train_area = data.iloc[1:train_idx, :].values
-test_area = data.iloc[train_idx:train_idx + horizon, :].values
 
 # normalize
 train_norm, meta = NormalizeMult(train_area)
@@ -70,21 +79,33 @@ meta_close = meta[close_col]
 minc, maxc = meta_close[0], meta_close[1]
 denorm_preds = np.array(preds) * (maxc - minc) + minc
 
-# Actual close prices
-true_close = data['close'].iloc[train_idx:train_idx + horizon].values
-dates = data.iloc[train_idx:train_idx + horizon].index
-
-# Print predictions with dates
+# Print predictions with fake dates (since horizon can be arbitrary)
 print("\n🔮 Predicted Close Prices:")
-for d, p in zip(dates, denorm_preds):
-    print(f"{d.strftime('%Y-%m-%d')}: {p:.4f}")
+last_known_date = data.index[train_idx - 1]
+future_dates = [last_known_date + pd.Timedelta(days=i) for i in range(1, horizon + 1)]
 
-# Evaluate
-evaluation_metric(true_close[:len(denorm_preds)], denorm_preds)
+for i, p in enumerate(denorm_preds, start=1):
+    print(f"{future_dates[i-1].strftime('%Y-%m-%d')}: {p:.4f}")
 
-# Plot
-plt.plot(dates, true_close[:len(denorm_preds)], label='Actual')
-plt.plot(dates, denorm_preds, label='Predicted (Attention)')
-plt.title(f'Predictions for next {horizon} days')
+# Plot predictions
+plt.figure(figsize=(8, 4))
+
+if horizon == 1:
+    # Just one point - show a dot with text
+    plt.scatter(future_dates, denorm_preds, color='red', label='Predicted Close Price')
+    plt.title("Prediction for Next Day")
+    plt.ylabel("Close Price")
+    plt.xticks([])  # Remove x-axis ticks
+    # Annotate with date
+    plt.text(0, denorm_preds[0], future_dates[0].strftime('%Y-%m-%d'),
+             ha='center', va='bottom', fontsize=10)
+else:
+    # Multiple days - plot normal line chart
+    plt.plot(future_dates, denorm_preds, label='Predicted (Attention)', marker='o')
+    plt.title(f'Predictions for next {horizon} days')
+    plt.xticks(rotation=45)
+
 plt.legend()
+plt.tight_layout()
 plt.show()
+
