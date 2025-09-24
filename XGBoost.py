@@ -1,67 +1,63 @@
+# XGBoost.py
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import *
-from model import walk_forward_validation
+from utils import NormalizeMult, DenormalizeMult, evaluation_metric, create_dataset_multivariate, data_split
+from models import walk_forward_validation
+from Config import Config
+import xgboost as xgb
 
-# Load stock data
+# Load data
 data = pd.read_csv('./601988.SH.csv')
 data.index = pd.to_datetime(data['trade_date'], format='%Y%m%d')
 data = data.loc[:, ['open', 'high', 'low', 'close', 'vol', 'amount']]
-# data = pd.DataFrame(data, dtype=np.float64)
-close = data.pop('close')
-data.insert(5, 'close', close)
-data1 = data.iloc[3501:, 5]
 
-# Load residuals
-residuals = pd.read_csv('./ARIMA_residuals1.csv')
-residuals.index = pd.to_datetime(residuals['trade_date'])
-residuals.pop('trade_date')
+# residuals & merge
+residuals = pd.read_csv('./ARIMA_residuals1.csv', parse_dates=['trade_date'], index_col='trade_date')
+merge = data.join(residuals, how='inner').select_dtypes(include=[np.number])
 
-# Merge data and residuals
-merge_data = pd.merge(data, residuals, on='trade_date')
+# Use only last part (starting from TRAIN_SPLIT_INDEX)
+start_idx = Config.TRAIN_SPLIT_INDEX
+horizon = Config.PREDICTION_HORIZON
 
-# Drop any non-numeric columns to avoid errors in XGBoost
-merge_data = merge_data.select_dtypes(include=[np.number])
+# Ensure we have enough rows
+if start_idx + horizon > len(merge):
+    # fallback: use last available horizon rows
+    merge_part = merge.iloc[-(horizon + Config.TIME_STEPS):]
+else:
+    merge_part = merge.iloc[start_idx - Config.TIME_STEPS:start_idx + horizon]
 
-#merge_data = merge_data.drop(labels='2007-01-04', axis=0)
-time = pd.Series(data.index[3501:])
+# Create supervised dataset for XGBoost residual prediction (n_in = 6 by previous code)
+supervised = create_dataset_multivariate(merge_part.values, time_steps=6)
+X, Y = supervised  # X shape (samples, 6, features), Y shape (samples, features)
+# We'll flatten X to (samples, 6*features)
+X_flat = X.reshape(X.shape[0], -1)
+Y_close = Y[:, 3]  # assuming close index 3
 
-# Load ARIMA predictions
-Lt = pd.read_csv('./ARIMA.csv')
-Lt = Lt.drop('trade_date', axis=1)
-Lt = np.array(Lt)
-Lt = Lt.flatten().tolist()
+# Split last 'horizon' rows as test
+trainX = X_flat[:-horizon]
+trainY = Y_close[:-horizon]
+testX = X_flat[-horizon:]
+testY = Y_close[-horizon:]
 
-# Prepare train/test datasets for supervised learning
-train, test = prepare_data(merge_data, n_test=180, n_in=6, n_out=1)
+# Fit XGBoost one-step per sample (walk-forward style)
+model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=Config.XGB_N_ESTIMATORS)
+model.fit(trainX, trainY)
+yhat = model.predict(testX)
 
-# Perform walk-forward validation using XGBoost
-y, yhat = walk_forward_validation(train, test)
+# Combine with ARIMA predictions
+arima = pd.read_csv('./ARIMA.csv', parse_dates=['trade_date'], index_col='trade_date')
+arima_vals = arima['close'].iloc[:len(yhat)].values  # align length
 
-# Plot residuals and predicted residuals
-plt.figure(figsize=(10, 6))
-plt.plot(time, y, label='Residuals')
-plt.plot(time, yhat, label='Predicted Residuals')
-plt.title('ARIMA+XGBoost: Residuals Prediction')
-plt.xlabel('Time', fontsize=12, verticalalignment='top')
-plt.ylabel('Residuals', fontsize=14, horizontalalignment='center')
-plt.legend()
-plt.show()
+final_pred = arima_vals + yhat
 
-# Combine ARIMA and predicted residuals to get final stock price prediction
-finalpredicted_stock_price = [i + j for i, j in zip(Lt, yhat)]
-#print('final', finalpredicted_stock_price)
+# Ground truth close
+truth_close = merge['close'].iloc[start_idx:start_idx + horizon].values
 
-# Evaluate prediction accuracy
-evaluation_metric(data1, finalpredicted_stock_price)
+evaluation_metric(truth_close[:len(final_pred)], final_pred)
 
-# Plot real vs predicted stock prices
-plt.figure(figsize=(10, 6))
-plt.plot(time, data1, label='Stock Price')
-plt.plot(time, finalpredicted_stock_price, label='Predicted Stock Price')
-plt.title('ARIMA+XGBoost: Stock Price Prediction')
-plt.xlabel('Time', fontsize=12, verticalalignment='top')
-plt.ylabel('Close', fontsize=14, horizontalalignment='center')
+dates = merge.index[start_idx:start_idx + horizon]
+plt.plot(dates, truth_close[:len(final_pred)], label='Actual')
+plt.plot(dates, final_pred, label='ARIMA+XGB')
 plt.legend()
 plt.show()

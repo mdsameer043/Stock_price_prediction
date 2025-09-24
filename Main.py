@@ -1,122 +1,88 @@
-from keras.optimizers import Adam
-import matplotlib.pyplot as plt
+# Main.py
 import pandas as pd
 import numpy as np
-from sklearn import metrics
-from utils import *
-from model import *
+import matplotlib.pyplot as plt
+from keras.optimizers import Adam
+from Config import Config
+from utils import NormalizeMult, DenormalizeMult, create_dataset_multivariate, evaluation_metric
+from models import attention_model
+import os
 
-# Load and prepare base stock data
-data1 = pd.read_csv("./601988.SH.csv")
-data1.index = pd.to_datetime(data1['trade_date'], format='%Y%m%d')
-data1 = data1.loc[:, ['open', 'high', 'low', 'close', 'vol', 'amount']]
-data_yuan = data1.copy()
+# Load base stock data
+df = pd.read_csv("./601988.SH.csv")
+df.index = pd.to_datetime(df['trade_date'], format='%Y%m%d')
+base = df.loc[:, ['open', 'high', 'low', 'close', 'vol', 'amount']]
 
+# load residuals (from ARIMA)
+residuals = pd.read_csv('./ARIMA_residuals1.csv', parse_dates=['trade_date'], index_col='trade_date')
+residuals = residuals.select_dtypes(include=[np.number])
 
-# Load ARIMA residuals and merge on trade_date
-residuals = pd.read_csv('./ARIMA_residuals1.csv')
-residuals.index = pd.to_datetime(residuals['trade_date'])
-residuals.pop('trade_date')
+# merge on index
+data = base.join(residuals, how='inner').select_dtypes(include=[np.number])
 
-# print(residuals.head(5))
-# exit()
-# Merge and remove suffixes
-data1 = pd.merge(data1, residuals, left_index=True, right_index=True)
+# Splits
+train_idx = Config.TRAIN_SPLIT_INDEX
+time_steps = Config.TIME_STEPS
+horizon = Config.PREDICTION_HORIZON
 
+# get training area (we will reserve last 'horizon' rows for short-term forecasting)
+train_area = data.iloc[1:train_idx, :].values
+test_area = data.iloc[train_idx:train_idx + horizon, :].values
 
-# print(data1.head(5))
-# exit()
-# a=data1.head(1)
-# for items in a:
-#     print(items)
-    
-# exit()
+# normalize
+train_norm, meta = NormalizeMult(train_area)
 
+# create sequence dataset
+X, Y = create_dataset_multivariate(train_norm, time_steps)  # X shape (samples, time_steps, features)
+# We want to predict 'close' value; find index of close in original merged df
+close_col = list(data.columns).index('close')  # index in merged dataset
 
-# for col in data1.columns:
-#     print(col)
-# exit()
+# Y we take the close column from Y (Y shape: samples, features)
+Y_close = Y[:, close_col]
 
-
-# Rename columns after merge (if residuals caused name collisions)
-data1.columns = [col.replace('_x', '').replace('_y', '') for col in data1.columns]
-
-
-
-
-
-# Split data into train/test and ensure all columns are numeric
-data = data1.iloc[1:3500, :].select_dtypes(include=[np.number])
-data2 = data1.iloc[3500:, :].select_dtypes(include=[np.number])
-
-TIME_STEPS = 20
-
-# Normalize training data
-data, normalize = NormalizeMult(data)
-print('#', normalize)
-
-# Extract 'close' column for prediction (Y label)
-pollution_data = data[:, 3].reshape(len(data), 1)  # Assuming 'close' is at index 3
-
-# Create training sequences
-train_X, _ = create_dataset(data, TIME_STEPS)
-_, train_Y = create_dataset(pollution_data, TIME_STEPS)
-
-print(train_X.shape, train_Y.shape)
-
-# Build and compile the attention model
-m = attention_model(INPUT_DIMS=data.shape[1])  # Dynamically use feature count
-m.summary()
-adam = Adam(learning_rate=0.01)
+# Build model
+INPUT_DIMS = X.shape[2]
+m = attention_model(INPUT_DIMS=INPUT_DIMS, TIME_STEPS=time_steps, lstm_units=64)
+adam = Adam(learning_rate=Config.LEARNING_RATE)
 m.compile(optimizer=adam, loss='mse')
+m.summary()
 
-# Train the model
-history = m.fit([train_X], train_Y, epochs=10, batch_size=64, validation_split=0.1)
+# Train
+history = m.fit(X, Y_close, epochs=Config.EPOCHS, batch_size=Config.BATCH_SIZE, validation_split=0.1)
 
-# Save model and normalization parameters
-m.save("./stock_model.h5")
-np.save("stock_normalize.npy", normalize)
+# Save model weights
+if not os.path.exists('./models'):
+    os.makedirs('./models')
+m.save_weights('./models/attention_weights.h5')
+np.save('normalize_meta.npy', meta)
 
-# Plot loss curves
-plt.plot(history.history['loss'], label='Training Loss')
-plt.plot(history.history['val_loss'], label='Validation Loss')
-plt.title('Training and Validation Loss')
+# Predict next 'horizon' days using sliding window from end of training_norm
+last_window = train_norm[-time_steps:].copy()
+preds = []
+current = last_window.copy()
+for i in range(horizon):
+    inp = np.expand_dims(current, axis=0)  # (1, time_steps, features)
+    yhat = m.predict(inp).flatten()[0]
+    preds.append(yhat)
+    # we need to create a full-feature dummy row to slide: replace the close's normalized value with yhat and shift
+    dummy = np.zeros((INPUT_DIMS,))
+    dummy[close_col] = yhat
+    current = np.vstack([current[1:], dummy])
+
+# Denormalize predictions for close column only
+meta_close = meta[close_col]  # [min, max]
+minc, maxc = meta_close[0], meta_close[1]
+denorm_preds = np.array(preds) * (maxc - minc) + minc
+
+# get ground truth close
+true_close = data['close'].iloc[train_idx:train_idx + horizon].values
+
+# Evaluate and print
+evaluation_metric(true_close[:len(denorm_preds)], denorm_preds)
+
+dates = data.iloc[train_idx:train_idx + horizon].index
+plt.plot(dates, true_close[:len(denorm_preds)], label='Actual')
+plt.plot(dates, denorm_preds, label='Predicted (Attention)')
+plt.title(f'Predictions for next {horizon} days')
 plt.legend()
 plt.show()
-
-# Prediction and evaluation
-class Config:
-    def __init__(self):
-        self.dimname = 'close'  # Now 'close' is restored in the merged DataFrame
-
-config = Config()
-name = config.dimname
-
-y_hat, y_test = PredictWithData(data2, data_yuan, name, 'stock_model.h5', data.shape[1])
-y_hat = np.array(y_hat, dtype='float64')
-y_test = np.array(y_test, dtype='float64')
-
-# Evaluation
-# evaluation_metric(y_test, y_hat)
-
-
-# Additional Evaluation Metrics
-mae = metrics.mean_absolute_error(y_test, y_hat)
-rmse = np.sqrt(metrics.mean_squared_error(y_test, y_hat))
-r2 = metrics.r2_score(y_test, y_hat)
-
-print(f"Mean Absolute Error (MAE): {mae:.4f}")
-print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
-print(f"R² Score: {r2:.4f}")
-
-# Plot predicted vs actual prices
-time = pd.Series(data1.index[3499:])
-plt.plot(time, y_test, label='True')
-plt.plot(time, y_hat, label='Prediction')
-plt.title('Hybrid model prediction')
-plt.xlabel('Time', fontsize=12, verticalalignment='top')
-plt.ylabel('Price', fontsize=14, horizontalalignment='center')
-plt.legend()
-plt.show()
-
-

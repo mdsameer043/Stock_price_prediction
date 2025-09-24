@@ -1,181 +1,116 @@
+# utils.py
 import numpy as np
 import pandas as pd
 from sklearn import metrics
 from statsmodels.tsa.stattools import adfuller
-import statsmodels.api as sm  # acf,pacf plot
+import statsmodels.api as sm
 import matplotlib.pyplot as plt
 
-def adf_test(temp):
-    # p-value>0.562 or Critical Value(1%)>-3.44, non-stationary
-    t = adfuller(temp)
-    output = pd.DataFrame(index=['Test Statistic Value', 'p-value', 'Lags Used', 'Number of Observations Used', 'Critical Value(1%)', 'Critical Value(5%)', 'Critical Value(10%)'], columns=['value'])
-    output['value']['Test Statistic Value'] = t[0]
-    output['value']['p-value'] = t[1]
-    output['value']['Lags Used'] = t[2]
-    output['value']['Number of Observations Used'] = t[3]
-    output['value']['Critical Value(1%)'] = t[4]['1%']
-    output['value']['Critical Value(5%)'] = t[4]['5%']
-    output['value']['Critical Value(10%)'] = t[4]['10%']
-    print(output)
+def adf_test(series):
+    t = adfuller(series)
+    output = {
+        'Test Statistic': t[0],
+        'p-value': t[1],
+        'Lags Used': t[2],
+        'Number of Observations': t[3],
+        'Critical Values': t[4]
+    }
+    print(pd.Series(output))
+    return output
 
-def acf_pacf_plot(seq,acf_lags=20,pacf_lags=20):
+def acf_pacf_plot(seq, acf_lags=40, pacf_lags=40):
     fig = plt.figure(figsize=(12, 8))
     ax1 = fig.add_subplot(211)
-    fig = sm.graphics.tsa.plot_acf(seq, lags=acf_lags, ax=ax1)
+    sm.graphics.tsa.plot_acf(seq, lags=acf_lags, ax=ax1)
     ax2 = fig.add_subplot(212)
-    fig = sm.graphics.tsa.plot_pacf(seq, lags=pacf_lags, ax=ax2)
+    sm.graphics.tsa.plot_pacf(seq, lags=pacf_lags, ax=ax2)
     plt.show()
 
-def order_select_ic(training_data_diff):
-    (p, q) = sm.tsa.arma_order_select_ic(training_data_diff, max_ar=6, max_ma=4, ic='bic')['bic_min_order']  # AIC
-    print(p, q)  # 2 0
-
-def order_select_search(training_set):
-    df2 = training_set['close'].diff(1).dropna()
-    # pmax = int(len(df2) / 10)
-    # qmax = int(len(df2) / 10)
-    pmax = 5
-    qmax = 5
-    bic_matrix = []
-    print('^', pmax, '^^', qmax)
-    for p in range(pmax + 1):
-        temp3 = []
-        for q in range(qmax+1):
-            try:
-                # print('!', ARIMA(data['close'], order=(p, 1, q)).fit().bic)
-                # temp.append(ARIMA(data['close'], order=(p, 1, q)).fit().bic)
-                temp3.append(sm.tsa.ARIMA(training_set['close'], order=(p, 1, q)).fit().bic)
-            except:
-                temp3.append(None)
-        bic_matrix.append(temp3)
-    bic_matrix = pd.DataFrame(bic_matrix) 
-    # print('&', bic_matrix)
-    # print('&&', bic_matrix.stack())
-    # print('&&&', bic_matrix.stack().astype('float64'))
-    p, q = bic_matrix.stack().astype('float64').idxmin()
-    print('p and q: %s,%s' % (p, q)) 
-
-def create_dataset(dataset, look_back=20):
-    dataX, dataY = [], []
-    for i in range(len(dataset)-look_back-1):
-        a = dataset[i:(i+look_back),:]
-        dataX.append(a)
-        dataY.append(dataset[i + look_back,:])
-    TrainX = np.array(dataX)
-    Train_Y = np.array(dataY)
-
-    return TrainX, Train_Y
-
-def evaluation_metric(y_test,y_hat):
-    MSE = metrics.mean_squared_error(y_test, y_hat)
-    RMSE = MSE**0.5
-    MAE = metrics.mean_absolute_error(y_test,y_hat)
-    R2 = metrics.r2_score(y_test,y_hat)
-    print('MSE: %.5f' % MSE)
-    print('RMSE: %.5f' % RMSE)
-    print('MAE: %.5f' % MAE)
-    print('R2: %.5f' % R2)
-
-def GetMAPE(y_hat, y_test):
-    sum = np.mean(np.abs((y_hat - y_test) / y_test)) * 100
-    return sum
-
-def GetMAPE_Order(y_hat,y_test):
-    zero_index = np.where(y_test == 0)
-    y_hat = np.delete(y_hat, zero_index[0])
-    y_test = np.delete(y_test, zero_index[0])
-    sum = np.mean(np.abs((y_hat - y_test) / y_test)) * 100
-    return sum
-
-def NormalizeMult(data):
-    data = np.array(data)
-    normalize = np.arange(2*data.shape[1], dtype='float64')
-
-    normalize = normalize.reshape(data.shape[1],2)
-    print(normalize.shape)
-    for i in range(0, data.shape[1]):
-        list = data[:, i]
-        listlow, listhigh = np.percentile(list, [0, 100])
-        # print(i)
-        normalize[i, 0] = listlow
-        normalize[i, 1] = listhigh
-        delta = listhigh - listlow
-        if delta != 0:
-            for j in range(0, data.shape[0]):
-                data[j, i] = (data[j, i] - listlow)/delta
-    # np.save("./normalize.npy",normalize)
-    return data, normalize
-
-def FNormalizeMult(data, normalize):
-    #inverse NormalizeMult
-    data = np.array(data)
-    listlow = normalize[0]
-    listhigh = normalize[1]
-    delta = listhigh - listlow
-    if delta != 0:
-        for i in range(len(data)):
-            data[i, 0] = data[i, 0] * delta + listlow
-    return data
-
-def NormalizeMultUseData(data,normalize):
-    data = np.array(data)
-    for i in range(0, data.shape[1]):
-        listlow = normalize[i, 0]
-        listhigh = normalize[i, 1]
-        delta = listhigh - listlow
-        if delta != 0:
-            for j in range(0,data.shape[0]):
-                data[j,i]  =  (data[j,i] - listlow)/delta
-    return  data
-
-# def data_split(sequence, n_timestamp):
-#     X = []
-#     y = []
-#     for i in range(len(sequence)):
-#         end_ix = i + n_timestamp
-
-#         if end_ix > len(sequence) - 1:
-#             break
-
-#         seq_x, seq_y = sequence[i:end_ix], sequence[end_ix]
-#         X.append(seq_x)
-#         y.append(seq_y)
-#     return np.array(X), np.array(y)
-
-def data_split(data, n_timestamp):
+def create_dataset_multivariate(data, time_steps):
+    """
+    Create sequences for multivariate time-series.
+    data: numpy array shape (samples, features)
+    returns X (samples-time_steps, time_steps, features) and y (samples-time_steps, features)
+    """
     X, y = [], []
-    for i in range(len(data) - n_timestamp):
-        X.append(data[i:i + n_timestamp])
-        y.append(data[i + n_timestamp])
+    for i in range(len(data) - time_steps):
+        X.append(data[i:i + time_steps])
+        y.append(data[i + time_steps])
     return np.array(X), np.array(y)
 
-
 def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
-    n_vars = 1 if type(data) is list else data.shape[1]
+    n_vars = data.shape[1] if hasattr(data, 'shape') else 1
     df = pd.DataFrame(data)
     cols, names = list(), list()
-    # input sequence (t-n, ... t-1)
+    # inputs
     for i in range(n_in, 0, -1):
         cols.append(df.shift(i))
         names += [('var%d(t-%d)' % (j + 1, i)) for j in range(n_vars)]
-    # forecast sequence (t, t+1, ... t+n)
+    # outputs
     for i in range(0, n_out):
         cols.append(df.shift(-i))
         if i == 0:
             names += [('var%d(t)' % (j + 1)) for j in range(n_vars)]
         else:
             names += [('var%d(t+%d)' % (j + 1, i)) for j in range(n_vars)]
-    # put it all together
     agg = pd.concat(cols, axis=1)
     agg.columns = names
-    # drop rows with NaN values
     if dropnan:
         agg.dropna(inplace=True)
     return agg
 
-def prepare_data(series, n_test, n_in, n_out):
-    values = series.values
-    supervised_data = series_to_supervised(values, n_in, n_out)
-    print('supervised_data', supervised_data)
-    train, test = supervised_data.loc[:3499, :], supervised_data.loc[3500:, :]
+def prepare_data(supervised_df, n_test):
+    """
+    Given a supervised dataframe (from series_to_supervised),
+    split into train and test based on index positions.
+    """
+    train = supervised_df.iloc[:n_test].copy()
+    test = supervised_df.iloc[n_test:].copy()
     return train, test
+
+def evaluation_metric(y_true, y_pred):
+    y_true = np.array(y_true).astype(float)
+    y_pred = np.array(y_pred).astype(float)
+    MSE = metrics.mean_squared_error(y_true, y_pred)
+    RMSE = np.sqrt(MSE)
+    MAE = metrics.mean_absolute_error(y_true, y_pred)
+    R2 = metrics.r2_score(y_true, y_pred)
+    print('MSE: %.5f' % MSE)
+    print('RMSE: %.5f' % RMSE)
+    print('MAE: %.5f' % MAE)
+    print('R2: %.5f' % R2)
+    return {'MSE': MSE, 'RMSE': RMSE, 'MAE': MAE, 'R2': R2}
+
+def NormalizeMult(data):
+    """
+    Vectorized normalization (min-max) column-wise.
+    data: numpy array or pandas DataFrame
+    returns normalized array and the min/max array for inverse
+    """
+    arr = np.array(data, dtype='float64')
+    mins = np.nanmin(arr, axis=0)
+    maxs = np.nanmax(arr, axis=0)
+    denom = (maxs - mins)
+    denom[denom == 0] = 1.0
+    norm = (arr - mins) / denom
+    meta = np.stack([mins, maxs], axis=1)
+    return norm, meta
+
+def DenormalizeMult(normed, meta):
+    mins = meta[:, 0]
+    maxs = meta[:, 1]
+    denom = (maxs - mins)
+    denom[denom == 0] = 1.0
+    return normed * denom + mins
+
+def data_split(sequence, n_timestamp):
+    """
+    Safe data_split that handles 1D or 2D arrays.
+    Returns X (samples, n_timestamp, features) and y (samples, features)
+    """
+    X, y = [], []
+    seq = np.array(sequence)
+    for i in range(len(seq) - n_timestamp):
+        X.append(seq[i:i + n_timestamp])
+        y.append(seq[i + n_timestamp])
+    return np.array(X), np.array(y)
