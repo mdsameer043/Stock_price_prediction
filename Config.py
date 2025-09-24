@@ -13,7 +13,7 @@ class Config:
     TRAIN_SPLIT_INDEX = 3500   # previously 3500
 
     # Prediction horizon: 1 (next day), 2 (two days), 7 (one week)
-    PREDICTION_HORIZON = 1
+    PREDICTION_HORIZON = 2
 
     # ARIMA order (if you want to change)
     ARIMA_ORDER = (2, 1, 0)
