@@ -18,11 +18,14 @@ residuals = pd.read_csv('./ARIMA_residuals1.csv')
 residuals.index = pd.to_datetime(residuals['trade_date'])
 residuals.pop('trade_date')
 
+# print(residuals.head(5))
+# exit()
 # Merge and remove suffixes
 data1 = pd.merge(data1, residuals, left_index=True, right_index=True)
 
 
 # print(data1.head(5))
+# exit()
 # a=data1.head(1)
 # for items in a:
 #     print(items)
@@ -30,8 +33,17 @@ data1 = pd.merge(data1, residuals, left_index=True, right_index=True)
 # exit()
 
 
+# for col in data1.columns:
+#     print(col)
+# exit()
+
+
 # Rename columns after merge (if residuals caused name collisions)
 data1.columns = [col.replace('_x', '').replace('_y', '') for col in data1.columns]
+
+
+
+
 
 # Split data into train/test and ensure all columns are numeric
 data = data1.iloc[1:3500, :].select_dtypes(include=[np.number])
