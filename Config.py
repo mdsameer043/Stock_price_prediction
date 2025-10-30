@@ -1,22 +1,11 @@
-# Config.py - single source of truth for hyperparams & indices
 class Config:
-    # Model selection: "Attention", "LSTM" (single), "BiLSTM"
     MODEL_NAME = "Attention"
-
-    # General training params
-    TIME_STEPS = 20            # look-back window
-    EPOCHS = 10
+    TIME_STEPS = 20          # keep 10-20 for fluctuations
+    EPOCHS = 25              # increase slightly
     BATCH_SIZE = 32
-    LEARNING_RATE = 0.001
-
-    # Data split (index where test set begins). Set according to your CSV length
-    TRAIN_SPLIT_INDEX = 3500   # previously 3500
-
-    # Prediction horizon: 1 (next day), 2 (two days), 7 (one week)
+    LEARNING_RATE = 0.0001
+    TRAIN_SPLIT_INDEX = 1238 # full dataset if CSV has ~1200 rows
     PREDICTION_HORIZON = 2
-
-    # ARIMA order (if you want to change)
     ARIMA_ORDER = (2, 1, 0)
-
-    # XGBoost params
     XGB_N_ESTIMATORS = 50
+    NOISE_LEVEL = 0.001      # optional small noise
